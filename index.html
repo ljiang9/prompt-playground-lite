@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prompt Playground Lite · 本地提示词调试台</title>
+<style>
+  :root {
+    --bg: #f1f5f9;
+    --panel: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --user-bubble: #4f46e5;
+    --ai-bubble: #f1f5f9;
+    --danger: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 18px; }
+  header .tag { font-size: 12px; color: var(--muted); }
+  .layout {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin: 10px 0 4px; }
+  input, textarea, select {
+    width: 100%;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+  }
+  textarea { resize: vertical; line-height: 1.5; }
+  input:focus, textarea:focus { outline: 2px solid #c7d2fe; border-color: var(--accent); }
+  .var-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .var-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { background: #f8fafc; }
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-weight: 600;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .mode-badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 8px;
+  }
+  .mode-echo { background: #fef3c7; color: #92400e; }
+  .mode-api { background: #dcfce7; color: #166534; }
+
+  /* 对话区 */
+  .chat {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 140px);
+    min-height: 480px;
+  }
+  .chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px;
+  }
+  .msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--ai-bubble);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.system-note {
+    align-self: center;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    max-width: 100%;
+  }
+  .msg .role { font-size: 11px; opacity: 0.7; margin-bottom: 4px; display: block; }
+  .send-area {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+  }
+  .send-area textarea { flex: 1; min-height: 44px; }
+  .status-line { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 16px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Prompt Playground Lite</h1>
+    <span class="tag">本地提示词调试台 · 单个 HTML · 无 key 也能用</span>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧：配置与模板 -->
+    <div class="panel">
+      <h2>模型连接 <span id="modeBadge" class="mode-badge mode-echo">本地回声模式</span></h2>
+
+      <label>Base URL（OpenAI 兼容，如 https://api.openai.com/v1）</label>
+      <input id="baseUrl" placeholder="留空则使用本地回声">
+
+      <label>API Key</label>
+      <input id="apiKey" type="password" placeholder="sk-...（仅保存在本机 localStorage）">
+
+      <label>模型（model）</label>
+      <input id="model" placeholder="如 gpt-4o-mini">
+
+      <label style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="useStream" style="width:auto;" checked> 使用流式（SSE）请求
+      </label>
+
+      <h2 style="margin-top:18px;">系统提示词（system prompt）</h2>
+      <textarea id="systemPrompt" rows="4" placeholder="你是一个乐于助人的助手。"></textarea>
+
+      <h2 style="margin-top:18px;">提示词模板（用 {{变量}} 占位）</h2>
+      <textarea id="template" rows="5" placeholder="例如：请把下面这句话翻译成英文：\n{{句子}}\n风格：{{风格}}"></textarea>
+      <div class="var-list" id="varList"></div>
+      <div class="var-hint">↑ 检测到的变量会自动生成输入框</div>
+
+      <div class="btn-row">
+        <button class="primary" id="sendBtn">发送 / 运行</button>
+        <button id="exportBtn">导出 JSON</button>
+        <button id="clearBtn">清空对话</button>
+      </div>
+      <div class="status-line" id="statusLine"></div>
+    </div>
+
+    <!-- 右侧：对话区 -->
+    <div class="panel chat">
+      <div class="chat-header">
+        <h2 style="margin:0;">对话展示区</h2>
+        <span class="tag" id="msgCount">0 条消息</span>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="send-area">
+        <textarea id="extraInput" placeholder="额外补充输入（可选，会追加到模板渲染后的用户消息末尾）"></textarea>
+        <button class="primary" id="sendBtn2">发送</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+const LS_KEY = "prompt-playground-lite-v1";
+
+/* ---------- DOM ---------- */
+const $ = (id) => document.getElementById(id);
+const els = {
+  baseUrl: $("baseUrl"), apiKey: $("apiKey"), model: $("model"),
+  useStream: $("useStream"), systemPrompt: $("systemPrompt"),
+  template: $("template"), varList: $("varList"),
+  messages: $("messages"), msgCount: $("msgCount"),
+  extraInput: $("extraInput"), statusLine: $("statusLine"),
+  modeBadge: $("modeBadge"),
+};
+
+/* ---------- 状态 ---------- */
+let conversation = [];   // {role, content}
+let varValues = {};      // 变量当前值
+
+/* ---------- 持久化 ---------- */
+function save() {
+  const data = {
+    config: {
+      baseUrl: els.baseUrl.value, apiKey: els.apiKey.value,
+      model: els.model.value, useStream: els.useStream.checked,
+      systemPrompt: els.systemPrompt.value, template: els.template.value,
+    },
+    varValues, conversation,
+  };
+  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch (e) {}
+}
+function load() {
+  let data;
+  try { data = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { data = null; }
+  if (!data) return;
+  const c = data.config || {};
+  els.baseUrl.value = c.baseUrl || "";
+  els.apiKey.value = c.apiKey || "";
+  els.model.value = c.model || "";
+  els.useStream.checked = c.useStream !== false;
+  els.systemPrompt.value = c.systemPrompt || "";
+  els.template.value = c.template || "";
+  varValues = data.varValues || {};
+  conversation = data.conversation || [];
+}
+
+/* ---------- 变量解析 ---------- */
+// 从模板中提取 {{变量名}}，返回去重后的变量名数组
+function parseVariables(template) {
+  const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  const names = [];
+  let m;
+  while ((m = re.exec(template)) !== null) {
+    const name = m[1].trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+// 渲染变量输入框（保留已填值）
+function renderVarInputs() {
+  const names = parseVariables(els.template.value);
+  els.varList.innerHTML = "";
+  if (names.length === 0) {
+    els.varList.innerHTML = '<div class="var-hint">模板中未检测到 {{变量}}</div>';
+    return;
+  }
+  for (const name of names) {
+    const wrap = document.createElement("div");
+    const label = document.createElement("label");
+    label.textContent = `{{${name}}}`;
+    const input = document.createElement("input");
+    input.value = varValues[name] || "";
+    input.addEventListener("input", () => { varValues[name] = input.value; save(); });
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    els.varList.appendChild(wrap);
+  }
+}
+
+// 用变量值填充模板
+function fillTemplate(template, vars) {
+  return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, name) => {
+    const k = name.trim();
+    return vars[k] !== undefined ? vars[k] : `{{${k}}}`;
+  });
+}
+
+/* ---------- 对话渲染 ---------- */
+function renderMessages() {
+  els.messages.innerHTML = "";
+  for (const msg of conversation) {
+    appendMsgEl(msg.role, msg.content);
+  }
+  els.msgCount.textContent = conversation.length + " 条消息";
+  els.messages.scrollTop = els.messages.scrollHeight;
+}
+function appendMsgEl(role, content) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "user" ? "user" : role === "assistant" ? "assistant" : "system-note");
+  if (role === "user" || role === "assistant") {
+    const span = document.createElement("span");
+    span.className = "role";
+    span.textContent = role === "user" ? "你" : "AI";
+    div.appendChild(span);
+  }
+  div.appendChild(document.createTextNode(content));
+  els.messages.appendChild(div);
+  return div;
+}
+function pushMsg(role, content) {
+  conversation.push({ role, content });
+  appendMsgEl(role, content);
+  els.msgCount.textContent = conversation.length + " 条消息";
+  els.messages.scrollTop = els.messages.scrollHeight;
+  save();
+}
+
+/* ---------- 模式判断 ---------- */
+function isApiMode() {
+  return els.baseUrl.value.trim() && els.apiKey.value.trim() && els.model.value.trim();
+}
+function updateBadge() {
+  if (isApiMode()) {
+    els.modeBadge.textContent = "API 模式";
+    els.modeBadge.className = "mode-badge mode-api";
+  } else {
+    els.modeBadge.textContent = "本地回声模式";
+    els.modeBadge.className = "mode-badge mode-echo";
+  }
+}
+
+/* ---------- 本地回声 ---------- */
+function localEcho(renderedUser) {
+  const sys = els.systemPrompt.value.trim();
+  let out = "【本地回声模式 · 未配置 API，以下为渲染结果回显】\n\n";
+  if (sys) out += "【system prompt】\n" + sys + "\n\n";
+  out += "【user 消息】\n" + renderedUser;
+  return out;
+}
+
+/* ---------- OpenAI 兼容请求 ---------- */
+async function callApi(renderedUser) {
+  const base = els.baseUrl.value.trim().replace(/\/+$/, "");
+  const url = base + "/chat/completions";
+  const messages = [];
+  if (els.systemPrompt.value.trim()) messages.push({ role: "system", content: els.systemPrompt.value.trim() });
+  // 带上历史对话（简化：最多最近 10 条，避免超长）
+  for (const m of conversation.slice(-10)) messages.push({ role: m.role, content: m.content });
+  messages.push({ role: "user", content: renderedUser });
+
+  const body = {
+    model: els.model.value.trim(),
+    messages,
+    stream: els.useStream.checked,
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + els.apiKey.value.trim(),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error("HTTP " + resp.status + " " + resp.statusText + "\n" + errText);
+  }
+
+  if (els.useStream.checked) {
+    return await readSse(resp);
+  } else {
+    const data = await resp.json();
+    return data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : JSON.stringify(data, null, 2);
+  }
+}
+
+// 解析 SSE 流式响应，边收边写
+async function readSse(resp) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let full = "";
+  // 一个空的 assistant 气泡，逐块填充
+  const bubble = appendMsgEl("assistant", "");
+  const roleSpan = bubble.querySelector(".role");
+  if (roleSpan) roleSpan.textContent = "AI";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop(); // 最后不完整的一行留到下次
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const json = JSON.parse(payload);
+        const delta = json.choices && json.choices[0] && json.choices[0].delta
+          ? json.choices[0].delta.content : "";
+        if (delta) {
+          full += delta;
+          bubble.textContent = "";
+          if (roleSpan) bubble.appendChild(roleSpan);
+          bubble.appendChild(document.createTextNode(full));
+          els.messages.scrollTop = els.messages.scrollHeight;
+        }
+      } catch (e) { /* 忽略不完整分片 */ }
+    }
+  }
+  return full;
+}
+
+/* ---------- 发送主流程 ---------- */
+async function onSend() {
+  if (onSend.busy) return;
+  onSend.busy = true;
+  $("sendBtn").disabled = true; $("sendBtn2").disabled = true;
+
+  const renderedUser = fillTemplate(els.template.value, varValues) +
+    (els.extraInput.value.trim() ? "\n\n" + els.extraInput.value.trim() : "");
+
+  if (!renderedUser.trim()) {
+    els.statusLine.textContent = "提示：模板为空，请先填写模板或变量。";
+    onSend.busy = false;
+    $("sendBtn").disabled = false; $("sendBtn2").disabled = false;
+    return;
+  }
+
+  pushMsg("user", renderedUser);
+  els.extraInput.value = "";
+  updateBadge();
+
+  try {
+    if (isApiMode()) {
+      els.statusLine.textContent = "正在请求模型…";
+      const reply = await callApi(renderedUser);
+      // 流式时已经边收边渲染过，这里不再重复 push
+      if (!els.useStream.checked) {
+        pushMsg("assistant", reply);
+      } else {
+        // 流式：把已渲染的内容存入 conversation
+        conversation.push({ role: "assistant", content: reply });
+        els.msgCount.textContent = conversation.length + " 条消息";
+        save();
+      }
+      els.statusLine.textContent = "完成。";
+    } else {
+      els.statusLine.textContent = "本地回声模式：未配置 API key，仅回显渲染结果。";
+      await new Promise(r => setTimeout(r, 300)); // 模拟一点延迟，体验更自然
+      pushMsg("assistant", localEcho(renderedUser));
+    }
+  } catch (err) {
+    const msg = "请求失败：" + (err.message || err);
+    els.statusLine.textContent = msg;
+    pushMsg("system-note", msg);
+  }
+
+  onSend.busy = false;
+  $("sendBtn").disabled = false; $("sendBtn2").disabled = false;
+  save();
+}
+
+/* ---------- 导出 JSON ---------- */
+function exportJson() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    mode: isApiMode() ? "api" : "echo",
+    config: {
+      baseUrl: els.baseUrl.value,
+      model: els.model.value,
+      // apiKey 也一并导出，方便备份（用户本地行为，提示安全）
+      apiKey: els.apiKey.value,
+      useStream: els.useStream.checked,
+      systemPrompt: els.systemPrompt.value,
+      template: els.template.value,
+    },
+    variables: varValues,
+    conversation,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "prompt-playground-export.json";
+  a.click();
+  URL.revokeObjectURL(url);
+  els.statusLine.textContent = "已导出 JSON 文件（注意：含 API key，请勿外传）。";
+}
+
+/* ---------- 事件绑定 ---------- */
+els.template.addEventListener("input", () => { renderVarInputs(); save(); });
+["baseUrl","apiKey","model","systemPrompt"].forEach(id => {
+  $(id).addEventListener("input", () => { updateBadge(); save(); });
+});
+els.useStream.addEventListener("change", save);
+$("sendBtn").addEventListener("click", onSend);
+$("sendBtn2").addEventListener("click", onSend);
+$("exportBtn").addEventListener("click", exportJson);
+$("clearBtn").addEventListener("click", () => {
+  conversation = [];
+  renderMessages();
+  save();
+  els.statusLine.textContent = "对话已清空。";
+});
+
+/* ---------- 初始化 ---------- */
+load();
+renderVarInputs();
+renderMessages();
+updateBadge();
+
+// 供 Node 测试时导出纯函数
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { parseVariables, fillTemplate };
+}
+</script>
+</body>
+</html>
